@@ -60,7 +60,8 @@ OURS = {'dm/host/romfs_arc.c', 'dm/host/romfs_arc.h', 'dm/tools/romfs_arc.py',
 # Vendored files that carry fork patches: taken fresh from upstream, then patched below.
 PATCHED = ('dm/host/hle_fs.c', 'dm/host/Makefile', 'dm/host/tests/Makefile', 'dm/ios/tools/build_ipa.sh',
            'scripts/build_ipa_from_nsp.py', 'dm/gfx/tools/shader_split.py',
-           'dm/ios/Sources/main.m', 'dm/gfx/nvn/nvn_mtl.m', 'dm/host/dm.h')
+           'dm/ios/Sources/main.m', 'dm/gfx/nvn/nvn_mtl.m', 'dm/host/dm.h',
+           'dm/games/settings.tsv', 'docs/settings.md')
 
 def git(*a):
     r = subprocess.run(['git', *a], cwd=REPO, capture_output=True, text=True)
@@ -765,6 +766,35 @@ def patch_shader_split(t):
     else: fail('dm/gfx/tools/shader_split.py: unzs zstd anchor missing')
     return t
 
+ANISO_ROW = 'DM_ANISO\tchoice\t0=Off,4=4x,8=8x,16=16x\t0\tgfxapi:nvn\tGame\tTexture filtering\tUses more GPU time.\n'
+def patch_settings_tsv(t):
+    # The launcher row for the fork's forced anisotropic filtering (nvn_mtl.m 'aniso force'), after Upscaling
+    if '\nDM_ANISO\t' in t: return skip('settings.tsv Texture filtering (already patched)')
+    m = re.search(r'^DM_PRESENT_UPSCALE\t[^\n]*\n', t, re.M)
+    if not m: fail('dm/games/settings.tsv: DM_PRESENT_UPSCALE row missing')
+    return done('settings.tsv Texture filtering', t[:m.end()] + ANISO_ROW + t[m.end():])
+
+ANISO_DOC = '''
+### Texture filtering
+
+Ground, walls and roads seen at a slant lose their detail a few metres away: the game samples their textures without anisotropic filtering, as on the Switch. **4x**, **8x** and **16x** keep them sharp further into the distance, the higher the further. **Off**, the default, draws them as the game asks. Shadows, depth tests and textures the game samples unfiltered keep the game's own settings.
+
+- **When to change it:** turn it up when the ground looks blurry in open areas and the frame rate holds. Tears of the Kingdom asks for no anisotropic filtering on any texture, so it changes most of its world.
+- **Cost:** more GPU time each frame. Tears of the Kingdom in the Room of Awakening on an M4 Pro Mac: 4.4 to 4.6 ms a frame at Off, 5.0 to 6.4 ms at 16x (macOS changes the GPU clock between runs, so the numbers spread). Not measured on an iPhone or iPad yet: if the game drops below its frame rate, choose a lower step.
+- **On the Mac:** the line `DM_ANISO=16` (or `4`, `8`) in `env.txt` sets it.
+'''
+def patch_settings_md(t):
+    # The player's page for the Texture filtering row: its table-of-contents link, its section after Upscaling, its env.txt row
+    if '### Texture filtering' in t: return skip('settings.md Texture filtering (already patched)')
+    toc = '[Upscaling](#upscaling), '
+    row = '| Upscaling | `DM_PRESENT_UPSCALE` | `off`, `metalfx` |\n'
+    for a in (toc, '\n### Game language\n', row):
+        if t.count(a) != 1: fail(f'docs/settings.md: anchor {a.strip()!r} missing or repeated')
+    t = t.replace(toc, toc + '[Texture filtering](#texture-filtering), ', 1)
+    t = t.replace('\n### Game language\n', ANISO_DOC + '\n### Game language\n', 1)
+    t = t.replace(row, row + '| Texture filtering | `DM_ANISO` | `0`, `4`, `8`, `16` |\n', 1)
+    return done('settings.md Texture filtering', t)
+
 NVM = 'dm/gfx/nvn/nvn_mtl.m'
 def patch_nvn_mtl(t):
     # The fork's fix for the iOS save-load freeze (NX2Apple issue #4): an upload batch's commit can sit
@@ -810,6 +840,17 @@ static int g_bc_cpu;       // decode BC on the CPU: no GPU support and the profi
             '''    unsigned slot = g_up_seq++ % 3;
     if (atomic_load(&g_up_alloc_busy[slot])) rec_publish();   // The commit of the batch that still holds this slot sits in the open replay block (rec_commit_upload). Hand the block to the encode thread before sleeping on the slot: a submit thread that opens a 4th batch within one submission would otherwise wait forever — nothing else hands the block over mid-submission, and the submission cannot end while up_begin blocks (the iOS save-load freeze of NX2Apple issue #4)
     up_wait_zero(&g_up_alloc_busy[slot]);''')]),
+        # Forced anisotropic filtering (the launcher's Texture filtering, DM_ANISO): Tears of the Kingdom
+        # samples every texture at 1x, so ground seen at a slant blurs a few metres away
+        ('aniso force', ['getenv("DM_ANISO")'], [(
+            '    d.maxAnisotropy = p.aniso < 1 ? 1 : p.aniso > 16 ? 16 : (NSUInteger)p.aniso;\n',
+            '''    d.maxAnisotropy = p.aniso < 1 ? 1 : p.aniso > 16 ? 16 : (NSUInteger)p.aniso;
+    // DM_ANISO=2..16 raises the anisotropy of filtered, mipmapped samplers (textures seen at a slant stay sharp, as an emulator's forced anisotropic filtering); depth-compare,
+    // min / max and unfiltered samplers keep the game's
+    static int force_aniso = -1;
+    if (force_aniso < 0) { const char *e = getenv("DM_ANISO"); force_aniso = e ? atoi(e) : 0; if (force_aniso > 16) force_aniso = 16; }
+    if (force_aniso > (int)d.maxAnisotropy && d.minFilter == MTLSamplerMinMagFilterLinear && d.mipFilter != MTLSamplerMipFilterNotMipmapped && !p.cmp_mode && !p.reduction) d.maxAnisotropy = force_aniso;
+''')]),
         ('finish publish', ['if (on_sub_thread()) rec_publish();'], [(
             '''    if (g_fence) mtl_wait(g_fence, UINT64_MAX);
     up_wait_zero(&g_up_pending);''',
@@ -1125,6 +1166,8 @@ MARKERS = {
     'dm/host/dm.h': 'hle_profile.h',
     'dm/host/front_mac.m': 'DM_KEYMAP',
     'dm/tools/patch_nso.py': 'TEXT_LO',
+    'dm/games/settings.tsv': '\nDM_ANISO\t',
+    'docs/settings.md': '### Texture filtering',
 }
 PATCHERS = {
     'dm/host/hle_fs.c': patch_hle_fs,
@@ -1139,6 +1182,8 @@ PATCHERS = {
     'dm/host/dm.h': patch_dm_h,
     'dm/host/front_mac.m': patch_front_mac,
     'dm/tools/patch_nso.py': patch_patch_nso,
+    'dm/games/settings.tsv': patch_settings_tsv,
+    'docs/settings.md': patch_settings_md,
 }
 
 report, problems = [], []

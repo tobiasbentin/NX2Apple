@@ -3,7 +3,7 @@
 The screen before the game starts shows the settings the game supports. Tap **Play** to start; the app remembers your choices for the next start. All settings are on one scrollable screen, under **Game**, **Controls** and **Performance**. Tap a menu or move a slider there; no settings page needs opening. **Upscaling** is in **Game**, beside **Console mode**.
 
 - [Tested defaults](#tested-defaults)
-- [Game](#game): [Frame rate](#frame-rate), [Render scale](#render-scale), [Console mode](#console-mode), [Upscaling](#upscaling), [Game language](#game-language), [Frame-rate counter](#frame-rate-counter)
+- [Game](#game): [Frame rate](#frame-rate), [Render scale](#render-scale), [Console mode](#console-mode), [Upscaling](#upscaling), [Texture filtering](#texture-filtering), [Game language](#game-language), [Frame-rate counter](#frame-rate-counter)
 - [Controls](#controls): [Touch feedback](#touch-feedback), [Game rumble](#game-rumble), [Rumble strength](#rumble-strength), [Rumble cutoff](#rumble-cutoff)
 - [Performance](#performance): [Frame buffering](#frame-buffering), [Metal 4 pipelines](#metal-4-pipelines), [Pipeline prebuild](#pipeline-prebuild), [Encode thread](#encode-thread), [Hold frames when late](#hold-frames-when-late), [Performance HUD](#performance-hud), [Reset to tested defaults](#reset-to-tested-defaults)
 - [Settings in a file](#settings-in-a-file)
@@ -46,6 +46,14 @@ Breath of the Wild renders 1280x720 in handheld mode. Docked it renders its worl
 - **When to change it:** turn it on if the picture looks soft and the device has GPU time to spare: on a Mac, or on an iPhone in handheld mode at 30 fps. For long sessions at 60 fps on an iPhone leave it at Standard.
 - **Cost:** more GPU time each frame, which can increase heat on an iPhone. [Breath of the Wild's measurements](../dm/games/01007EF00011E000/README.md#upscaling-current) cover Mac and iPhone; the matching iPhone Standard run and MetalFX's share of the thermal cost remain unmeasured. Nothing changes while the game's picture is as large as the screen. Unsupported devices and sizes use Standard scaling.
 - **On the Mac:** the Mac app has no settings screen; the line `DM_PRESENT_UPSCALE=metalfx` in its `env.txt` turns it on (off by default). It helps in a large window or on a 4K screen.
+
+### Texture filtering
+
+Ground, walls and roads seen at a slant lose their detail a few metres away: the game samples their textures without anisotropic filtering, as on the Switch. **4x**, **8x** and **16x** keep them sharp further into the distance, the higher the further. **Off**, the default, draws them as the game asks. Shadows, depth tests and textures the game samples unfiltered keep the game's own settings.
+
+- **When to change it:** turn it up when the ground looks blurry in open areas and the frame rate holds. Tears of the Kingdom asks for no anisotropic filtering on any texture, so it changes most of its world.
+- **Cost:** more GPU time each frame. Tears of the Kingdom in the Room of Awakening on an M4 Pro Mac: 4.4 to 4.6 ms a frame at Off, 5.0 to 6.4 ms at 16x (macOS changes the GPU clock between runs, so the numbers spread). Not measured on an iPhone or iPad yet: if the game drops below its frame rate, choose a lower step.
+- **On the Mac:** the line `DM_ANISO=16` (or `4`, `8`) in `env.txt` sets it.
 
 ### Game language
 
@@ -193,6 +201,7 @@ A line like `DM_PRESENT_SNAP=0` in `Documents/env.txt` (in the Files app, under 
 | Rumble strength | `DM_RUMBLE_GAIN` | `0` to `3` |
 | Rumble cutoff | `DM_RUMBLE_MIN` | `0` to `0.9` |
 | Upscaling | `DM_PRESENT_UPSCALE` | `off`, `metalfx` |
+| Texture filtering | `DM_ANISO` | `0`, `4`, `8`, `16` |
 | Frame buffering | `DM_PRESENT_SNAP` | `1`, `0` |
 | Metal 4 pipelines | `DM_PSO_MTL4` | `1`, `0` |
 | Pipeline prebuild | `DM_PSO_PREBUILD` | `1`, `0` |
