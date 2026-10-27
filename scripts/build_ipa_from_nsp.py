@@ -1947,6 +1947,16 @@ def main(args=None):
             env['HOME'] = os.environ['HOME'] = str(home)
             say(f'HOME: {home} (taken from the password database; the environment had none)')
     env.setdefault('DOTNET_CLI_HOME', env['HOME'])   # .NET writes its first-run state here
+    # TMPDIR too: with HOME set but TMPDIR unset, .NET 10's first-run configure dies the same way
+    # ('NuGet-Migrations' + lstat("") == ENOENT; its named mutex lives under TMPDIR). launchd sets it
+    # for a login session, but the app starts this script with a small environment of its own that
+    # has no TMPDIR. Only the first dotnet run on a machine takes that mutex, so it shows up once.
+    if not env.get('TMPDIR') or not os.path.isdir(env['TMPDIR']):
+        try: tmp = subprocess.run(['getconf', 'DARWIN_USER_TEMP_DIR'], capture_output=True, text=True, timeout=10).stdout.strip()
+        except Exception: tmp = ''
+        if not os.path.isdir(tmp): tmp = tempfile.gettempdir()
+        env['TMPDIR'] = os.environ['TMPDIR'] = tmp
+        say(f'TMPDIR: {tmp} (the environment had none)')
     # No first-run banner, no telemetry: a build neither wants nor reads either, and the telemetry
     # call can hang the first run on a network that cannot reach Microsoft. setdefault, so a user
     # who wants telemetry on keeps it.

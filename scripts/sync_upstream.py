@@ -647,6 +647,22 @@ def patch_nsp(t):
     # who wants telemetry on keeps it.
     env.setdefault('DOTNET_CLI_TELEMETRY_OPTOUT', '1')
     env.setdefault('DOTNET_NOLOGO', '1')""")]))
+    # TMPDIR can be missing too: the app starts the script with its own small environment, and
+    # .NET 10's first-run configure then dies the same NuGet-Migrations way even with HOME set.
+    P.append(('TMPDIR fallback', "env['TMPDIR'] = os.environ['TMPDIR']", [(
+        "    env.setdefault('DOTNET_CLI_HOME', env['HOME'])   # .NET writes its first-run state here\n",
+        """    env.setdefault('DOTNET_CLI_HOME', env['HOME'])   # .NET writes its first-run state here
+    # TMPDIR too: with HOME set but TMPDIR unset, .NET 10's first-run configure dies the same way
+    # ('NuGet-Migrations' + lstat("") == ENOENT; its named mutex lives under TMPDIR). launchd sets it
+    # for a login session, but the app starts this script with a small environment of its own that
+    # has no TMPDIR. Only the first dotnet run on a machine takes that mutex, so it shows up once.
+    if not env.get('TMPDIR') or not os.path.isdir(env['TMPDIR']):
+        try: tmp = subprocess.run(['getconf', 'DARWIN_USER_TEMP_DIR'], capture_output=True, text=True, timeout=10).stdout.strip()
+        except Exception: tmp = ''
+        if not os.path.isdir(tmp): tmp = tempfile.gettempdir()
+        env['TMPDIR'] = os.environ['TMPDIR'] = tmp
+        say(f'TMPDIR: {tmp} (the environment had none)')
+""")]))
     P.append(('3.9 survey note', "listed = ', '.join('{} ({})'.format(n, mods[n]['kind'])", [(
         '''    if extra: notes.append(f'modules besides main / sdk: {", ".join(f"{n} ({mods[n]["kind"]})" for n in extra)}; the provisional profile loads {G["modules"][0]} (load order main, subsdk*, sdk)')''',
         '''    if extra:
@@ -730,14 +746,24 @@ def rmtree(p):
 
 def patch_shader_split(t):
     # Upstream fixed the same 3.9 f-string themselves (d4249e5: a label variable); either fix ends it.
-    if 'label = re.sub(r"^(\\.\\./)+", "", os.path.normpath(pk.mount + name))' in t: return skip('shader_split.py (upstream fixed it)')
-    if 'a backslash cannot sit inside an f-string expression' in t: return skip('shader_split.py (already patched)')
-    old = '''        ue_inline_shaders(d, f'/{rel}#{re.sub(r"^(\\.\\./)+", "", os.path.normpath(pk.mount + name))}', out)'''
-    if old not in t: fail('dm/gfx/tools/shader_split.py: ue_inline_shaders anchor missing')
-    # The same shape as upstream's own fix (d4249e5), so the marker holds whichever of the two applied
-    new = '''        label = re.sub(r"^(\\.\\./)+", "", os.path.normpath(pk.mount + name))   # a backslash cannot sit inside an f-string expression before 3.12
+    if 'label = re.sub(r"^(\\.\\./)+", "", os.path.normpath(pk.mount + name))' in t: skip('shader_split.py 3.9 (upstream fixed it)')
+    elif 'a backslash cannot sit inside an f-string expression' in t: skip('shader_split.py 3.9 (already patched)')
+    else:
+        old = '''        ue_inline_shaders(d, f'/{rel}#{re.sub(r"^(\\.\\./)+", "", os.path.normpath(pk.mount + name))}', out)'''
+        if old not in t: fail('dm/gfx/tools/shader_split.py: ue_inline_shaders anchor missing')
+        # The same shape as upstream's own fix (d4249e5), so the marker holds whichever of the two applied
+        new = '''        label = re.sub(r"^(\\.\\./)+", "", os.path.normpath(pk.mount + name))   # a backslash cannot sit inside an f-string expression before 3.12
         ue_inline_shaders(d, f'/{rel}#{label}', out)'''
-    return done('shader_split.py 3.9', t.replace(old, new, 1))
+        t = done('shader_split.py 3.9', t.replace(old, new, 1))
+    # Since e09ff95 the RomFS can be one image (extract/<version>/RomFS.img) and `open` reads paths
+    # inside it, but the zstd command got the path itself: every dictionary-less .zs failed (Tears of
+    # the Kingdom: 32,176 files, their shaders left out). Hand it the bytes already read instead.
+    zs_old = "    if not did: return subprocess.run(['zstd', '-d', '-c', '-q', path], capture_output=True, check=True).stdout"
+    zs_new = "    if not did: return subprocess.run(['zstd', '-d', '-c', '-q'], input=d, capture_output=True, check=True).stdout   # the bytes on stdin: inside a RomFS image the path is no file the command can open"
+    if "'-q'], input=d" in t: skip('shader_split.py zstd stdin (already patched)')
+    elif zs_old in t: t = done('shader_split.py zstd stdin', t.replace(zs_old, zs_new, 1))
+    else: fail('dm/gfx/tools/shader_split.py: unzs zstd anchor missing')
+    return t
 
 NVM = 'dm/gfx/nvn/nvn_mtl.m'
 def patch_nvn_mtl(t):
