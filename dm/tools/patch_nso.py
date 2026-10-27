@@ -50,6 +50,7 @@ for i, (fo, mo, sz) in enumerate(segs):
     if flags >> i & 1: raw = lz4.block.decompress(raw, uncompressed_size=sz)
     IMG[mo:mo + sz] = raw
 TEXT_END = segs[0][2]
+TEXT_LO = segs[0][1]   # where the text begins in IMG: 0 for an NSO, 0x80 for an NRO (its header); set here, before the unwind table's starts are bounded by it
 RO_OFF, DATA_OFF = segs[1][1], segs[2][1]
 if FAR:
     FILE_IMAGE_LEN = (len(IMG) + 0x3FFF) & ~0x3FFF
@@ -476,7 +477,6 @@ DATA_BLOCKS = nso_code.data_blocks(IMG, TEXT_LO + TEXT_END, md, lo=TEXT_LO)
 # "44 ldr x18, #0xfffffffffff40370" on Final Fantasy X/X-2 HD Remaster (GitHub issue #14).
 # TEXT_LO is where the code really begins in IMG; data_blocks() gets the same lower bound so its
 # returned offsets are already IMG-absolute and CODE_RANGES needs no further shift.
-TEXT_LO = segs[0][1]
 CODE_RANGES = list(zip([TEXT_LO] + [e for _, e in DATA_BLOCKS], [s for s, _ in DATA_BLOCKS] + [TEXT_LO + TEXT_END]))
 md_lite = Cs(CS_ARCH_ARM64, CS_MODE_ARM)   # no details: the x18 scan reads only the operand text
 R18 = re.compile(r'\b[xw]18\b')

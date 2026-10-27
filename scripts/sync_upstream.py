@@ -1002,6 +1002,11 @@ def patch_patch_nso(t):
     """
     if 'TEXT_LO = segs[0][1]' in t: return skip('patch_nso.py NRO header (already patched)')
     P = [
+        # Defined with TEXT_END: the unwind table's starts are bounded by TEXT_LO + TEXT_END above the
+        # code ranges, and defining it down there raised NameError on every module (9f7d421)
+        ('text start', 'TEXT_END = segs[0][2]\n',
+         'TEXT_END = segs[0][2]\n'
+         'TEXT_LO = segs[0][1]   # where the text begins in IMG: 0 for an NSO, 0x80 for an NRO (its header); set here, before the unwind table\'s starts are bounded by it\n'),
         ('data blocks and code ranges',
          'DATA_BLOCKS = nso_code.data_blocks(IMG, TEXT_END, md)\n'
          'CODE_RANGES = list(zip([0] + [e for _, e in DATA_BLOCKS], [s for s, _ in DATA_BLOCKS] + [TEXT_END]))\n',
@@ -1012,7 +1017,6 @@ def patch_patch_nso(t):
          '# "44 ldr x18, #0xfffffffffff40370" on Final Fantasy X/X-2 HD Remaster (GitHub issue #14).\n'
          '# TEXT_LO is where the code really begins in IMG; data_blocks() gets the same lower bound so its\n'
          '# returned offsets are already IMG-absolute and CODE_RANGES needs no further shift.\n'
-         'TEXT_LO = segs[0][1]\n'
          'CODE_RANGES = list(zip([TEXT_LO] + [e for _, e in DATA_BLOCKS], [s for s, _ in DATA_BLOCKS] + [TEXT_LO + TEXT_END]))\n'),
         ('site starts bound', 'starts = sorted(x for x in starts if x < TEXT_END)',
          'starts = sorted(x for x in starts if x < TEXT_LO + TEXT_END)'),
